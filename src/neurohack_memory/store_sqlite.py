@@ -21,7 +21,7 @@ class SQLiteMemoryStore:
     def __init__(self, path="artifacts/memory.sqlite"):
         os.makedirs("artifacts", exist_ok=True)
         self.path = path
-        self.conn = sqlite3.connect(self.path)
+        self.conn = sqlite3.connect(self.path, check_same_thread=False)
         self.conn.executescript(SCHEMA)
         self.conn.commit()
 

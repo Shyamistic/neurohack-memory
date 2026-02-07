@@ -30,8 +30,9 @@ venv/
 .env
 
 # Database
-*.sqlite
 *.db
+# Allow specific sqlite for demo
+!artifacts/memory.sqlite
 
 # IDE
 .vscode/
@@ -42,7 +43,9 @@ venv/
 Thumbs.db
 
 # Artifacts
-artifacts/
+artifacts/*
+!artifacts/metrics.json
+!artifacts/memory.sqlite
 neurohack_submission.zip
 
 # Jupyter

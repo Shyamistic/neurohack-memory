@@ -89,6 +89,8 @@ def get_system():
         os.makedirs("artifacts")
         
     # FORCE SQLite path to be persistence-friendly
+    if "storage" not in cfg:
+        cfg["storage"] = {}
     cfg["storage"]["path"] = "artifacts/memory.sqlite"
     
     sys = MemorySystem(cfg)
@@ -137,7 +139,9 @@ with tab_live:
         mode = st.radio("Interaction Mode:", ["Query (Retrieval)", "Inject (Add Memory)"], horizontal=True, label_visibility="collapsed")
         
         if st.button("Execute", use_container_width=True):
-            if not sys:
+            if not user_query:
+                st.warning("⚠️ Please provide a query or memory to process.")
+            elif not sys:
                 st.error("System Offline.")
             else:
                 if mode == "Query (Retrieval)":
@@ -303,7 +307,38 @@ with tab_internals:
              
         with col_db2:
             st.markdown('<div class="glass-container">', unsafe_allow_html=True)
-            st.markdown("### 📝 Raw Database Inspector (Last 10 Entries)")
+            st.markdown("### �️ Admin Actions")
+            
+            if st.button("♻️ Reset & Seed Demo Data", type="primary", use_container_width=True):
+                if sys:
+                    # Clear DB
+                    sys.store.conn.execute("DELETE FROM memories")
+                    sys.store.conn.commit()
+                    sys._memory_cache.clear()
+                    sys.turn = 0
+                    
+                    # Seed
+                    seed_data = [
+                        "Call me after 9 AM",
+                        "Actually, prefer calls after 2 PM",
+                        "Update: Only calls between 4 PM and 6 PM are allowed"
+                    ]
+                    
+                    progress_text = st.empty()
+                    progress_bar = st.progress(0)
+                    
+                    for i, text in enumerate(seed_data):
+                        progress_text.text(f"Seeding Memory {i+1}/{len(seed_data)}: '{text}'")
+                        asyncio.run(sys.process_turn(text))
+                        progress_bar.progress((i+1)/len(seed_data))
+                        
+                    progress_text.empty()
+                    progress_bar.empty()
+                    st.toast("System Reset & Seeded Successfully!", icon="✅")
+                    st.rerun()
+            
+            st.markdown("---")
+            st.markdown("### �📝 Raw Database Inspector (Last 10 Entries)")
             
             df_raw = pd.read_sql_query("SELECT memory_id, type, key, value, confidence, source_turn FROM memories ORDER BY source_turn DESC LIMIT 10", conn)
             st.dataframe(df_raw, use_container_width=True, hide_index=True)
