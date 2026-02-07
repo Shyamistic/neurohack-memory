@@ -44,7 +44,9 @@ def zip_directory(folder_path, zip_path):
             "run_demo.sh",
             "run_demo.bat",
             "SYSTEM_REPORT.md",
-            "GAMMA_PROMPT.md"
+            "GAMMA_PROMPT.md",
+            "app.py",
+            "DEPLOY.md"
         ]
         for f in critical:
             if f not in namelist:
