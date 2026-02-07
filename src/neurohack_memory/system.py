@@ -1,0 +1,114 @@
+from typing import Dict, List
+import os
+from .types import MemoryEntry, RetrievedMemory
+from .extractors import extract
+from .store_sqlite import SQLiteMemoryStore
+from .vector_index import VectorIndex
+from .utils import exp_decay, Timer
+from .rerank import rerank
+from .inject import format_injection
+
+class MemorySystem:
+    def __init__(self, config):
+        self.cfg = config
+        os.makedirs("artifacts", exist_ok=True)
+        os.makedirs("artifacts", exist_ok=True)
+        db_path = self.cfg.get("storage", {}).get("path", "artifacts/memory.sqlite")
+        self.store = SQLiteMemoryStore(path=db_path)
+        self.vindex = VectorIndex(self.cfg["vector"]["embedding_model"])
+        self.turn = 0
+        self._memory_cache = {}
+
+    async def process_turn(self, user_text):
+        self.turn += 1
+        t_extract = Timer.start()
+        extracted = await extract(user_text, self.turn)
+        extract_ms = t_extract.ms()
+        for m in extracted:
+            self._memory_cache[m.memory_id] = m
+        self.store.upsert_many(extracted)
+        self.vindex.add_or_update(extracted)
+        return {"turn": self.turn, "extracted": extracted, "extract_ms": extract_ms}
+
+    def retrieve(self, query):
+        cfgm = self.cfg["memory"]
+        t = Timer.start()
+        hits = self.vindex.search(query, top_k=max(10, cfgm["top_k"]*3))
+        candidates = []
+        for mid, base_score in hits:
+            m = self._memory_cache.get(mid)
+            if not m:
+                continue
+            age = self.turn - m.source_turn
+            if age > cfgm["max_memory_age_turns"]:
+                continue
+            decay = exp_decay(age, cfgm["decay_lambda"])
+            score = float(base_score) * float(m.confidence) * decay
+            text = f"{m.type.value}|{m.key}={m.value}"
+            candidates.append((mid, text, score))
+
+        # CONFLICT RESOLUTION: keep highest-confidence version of each key
+        key_cache = {}
+        for mid, text, score in candidates:
+            m = self._memory_cache[mid]
+            # Key format: TYPE:KEY (e.g., preference:language)
+            key = f"{m.type.value}:{m.key}"
+            
+            # Smart Conflict Resolution:
+            # 1. Prefer significantly higher confidence ( > 0.1 diff)
+            # 2. If confidence is similar, prefer the NEWER memory (Update logic)
+            # 3. Handle explicit negations (if value is "DELETE" or "NULL") - TBD, for now just overwrites
+            
+            if key not in key_cache:
+                key_cache[key] = (mid, text, score)
+            else:
+                curr_mid, _, curr_score = key_cache[key]
+                curr_m = self._memory_cache[curr_mid]
+                
+                # Confidence diff check
+                conf_diff = m.confidence - curr_m.confidence
+                
+                if conf_diff > 0.1:
+                    # New one is much more confident -> Replace
+                    key_cache[key] = (mid, text, score)
+                elif conf_diff < -0.1:
+                    # Old one is much more confident -> Keep old
+                    pass
+                else:
+                    # Similar confidence: Prefer RECENCY
+                    if m.source_turn > curr_m.source_turn:
+                        # New memory is more recent -> Replace
+                        # Bonus: Boost score slightly for recency to reflect "current truth"
+                        boosted_score = score * 1.1 
+                        key_cache[key] = (mid, text, boosted_score)
+                    else:
+                        # Old memory is more recent (unlikely in this loop order but safe to handle)
+                        pass
+        resolved_candidates = list(key_cache.values())
+
+        if cfgm.get("rerank", True) and resolved_candidates:
+            rr = rerank(query, resolved_candidates)
+            ranked = rr[: cfgm["top_k"]]
+            ranker_name = "multi_signal_rerank"
+            score_map = {mid: s for mid, s in ranked}
+            ordered_ids = [mid for mid, _ in ranked]
+        else:
+            resolved_candidates.sort(key=lambda x: x[2], reverse=True)
+            top = resolved_candidates[: cfgm["top_k"]]
+            ranker_name = "semantic_only"
+            score_map = {mid: s for mid, _, s in top}
+            ordered_ids = [mid for mid, _, _ in top]
+
+        retrieved = []
+        for mid in ordered_ids:
+            m = self._memory_cache.get(mid)
+            if not m:
+                continue
+            retrieved.append(RetrievedMemory(memory=m, score=score_map[mid], ranker=ranker_name))
+
+        retrieve_ms = t.ms()
+        injected = format_injection([r.memory for r in retrieved], max_tokens=cfgm["max_injected_tokens"])
+        return {"turn": self.turn, "retrieved": retrieved, "retrieve_ms": retrieve_ms, "injected_context": injected}
+
+    def close(self):
+        self.store.close()

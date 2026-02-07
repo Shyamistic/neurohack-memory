@@ -1,0 +1,6 @@
+@echo off
+echo Starting NeuroHack Memory Demo...
+echo Simulating 5000 turns with 80%% noise...
+python demo.py --turns 5000 --noise 0.8
+echo Demo complete.
+pause

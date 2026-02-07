@@ -1,0 +1,13 @@
+memory:
+  confidence_threshold: 0.72
+  top_k: 6
+  rerank: true
+  max_injected_tokens: 320
+  decay_lambda: 0.008
+  max_memory_age_turns: 1400
+vector:
+  embedding_model: all-MiniLM-L6-v2
+evaluation:
+  checkpoints: [100, 500, 937, 1000, 1200]
+  recall_k: 6
+  precision_k: 6
