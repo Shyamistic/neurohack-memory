@@ -1,0 +1,17 @@
+{
+  "standard_dataset": {
+    "recall": 1.0,
+    "latency_p95_ms": 18.5
+  },
+  "adversarial_dataset": {
+    "recall": 1.0,
+    "precision": 0.98,
+    "conflict_handling": 1.0,
+    "avg_latency_ms": 25.8
+  },
+  "latency_benchmark": {
+    "100_turns_ms": 16.5,
+    "1000_turns_ms": 28.8,
+    "5000_turns_ms": 51.5
+  }
+}
