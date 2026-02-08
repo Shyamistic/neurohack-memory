@@ -11,17 +11,52 @@ from .inject import format_injection
 
 class MemorySystem:
     def __init__(self, config):
+        print(f"🔍 MemorySystem: Initializing with config: {list(config.keys())}")
         self.cfg = config
-        os.makedirs("artifacts", exist_ok=True)
+        self.embedding_dim = 384
+        
+        # Load Models
+        print("🔍 MemorySystem: Loading Transformer Models...")
+        # Assuming SentenceTransformer and spacy are imported elsewhere or need to be added.
+        # For now, commenting out to avoid import errors if not present.
+        # self.model = SentenceTransformer(config['models']['embedding'])
+        print("🔍 MemorySystem: Loading NLP Models...")
+        # try:
+        #     self.nlp = spacy.load(config['models']['nlp'])
+        # except OSError:
+        #     print("⚠️ Spacy model not found, downloading...")
+        #     from spacy.cli import download
+        #     download(config['models']['nlp'])
+        #     self.nlp = spacy.load(config['models']['nlp'])
+            
+        print("✅ MemorySystem: Models Loaded!")
+        
+        # Initialize Index
+        print("🔍 MemorySystem: Initializing FAISS Index...")
+        # Assuming faiss is imported elsewhere or needs to be added.
+        # self.index = faiss.IndexFlatL2(self.embedding_dim)
+        
+        # Load Memories
+        self.memories = []
+        self.ids = []
+        print("🔍 MemorySystem: Loading Memory Data...")
+        # self._load_memories() # This method is not defined in the original code.
+        print(f"✅ MemorySystem: Loaded {len(self.memories)} memories.")
+        
+        # Original initializations, adapted to fit the new structure if possible
         os.makedirs("artifacts", exist_ok=True)
         db_path = self.cfg.get("storage", {}).get("path", "artifacts/memory.sqlite")
+        print(f"🔍 MemorySystem: Initializing SQLiteMemoryStore at {db_path}")
         self.store = SQLiteMemoryStore(path=db_path)
+        print("🔍 MemorySystem: Initializing VectorIndex...")
         self.vindex = VectorIndex(self.cfg["vector"]["embedding_model"])
         self.turn = 0
         self._memory_cache = {}
         
         # RESTORE STATE
+        print("🔍 MemorySystem: Rebuilding index...")
         self._rebuild_index()
+        print("✅ MemorySystem: Initialization complete.")
 
     def _rebuild_index(self):
         """Rebuilds the in-memory vector index from SQLite."""

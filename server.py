@@ -16,14 +16,20 @@ from neurohack_memory.utils import load_yaml
 # -----------------------------------------------------------------------------
 app = FastAPI(title="NeuroHack Memory Backend", version="2.0.0")
 
-# Singleton System
-sys: Optional[MemorySystem] = None
+# SINGLETON SYSTEM
+_SYSTEM_INSTANCE = None
+
+print("🔍 Server: Loading System Module...")
 
 def get_system():
-    global sys
-    if sys is None:
-        print("⚡ Initializing Memory System...")
+    global _SYSTEM_INSTANCE
+    if _SYSTEM_INSTANCE is None:
+        print("🔍 Server: Initializing MemorySystem (This may take time)...")
+        from neurohack_memory import MemorySystem
+        from neurohack_memory.utils import load_yaml
+        
         cfg = load_yaml("config.yaml")
+        print("🔍 Server: Config Loaded. Creating Instance...")
         
         # Ensure artifacts directory
         if not os.path.exists("artifacts"):
