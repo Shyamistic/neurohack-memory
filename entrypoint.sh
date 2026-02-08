@@ -8,18 +8,22 @@ BACKEND_PID=$!
 
 # Wait for Backend to initialize (Loop until port 8000 is open)
 echo "⏳ Waiting for backend to start..."
-for i in {1..30}; do
+for i in {1..120}; do
     if curl -s http://127.0.0.1:8000 > /dev/null; then
         echo "✅ Backend is UP!"
         break
     fi
-    echo "zzz... ($i/30)"
+    echo "zzz... ($i/120)"
+    if ! kill -0 $BACKEND_PID 2>/dev/null; then
+        echo "❌ Backend DIED prematurely."
+        break
+    fi
     sleep 1
 done
 
-# Check if backend died
-if ! kill -0 $BACKEND_PID 2>/dev/null; then
-    echo "❌ Backend FAILED to start. Showing logs:"
+# Check if backend failed to start (Timeout or Crash)
+if ! curl -s http://127.0.0.1:8000 > /dev/null; then
+    echo "❌ Backend FAILED to start (Timeout or Crash). Showing logs:"
     cat backend.log
     exit 1
 fi
