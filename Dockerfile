@@ -15,6 +15,9 @@ COPY requirements.txt .
 # Install Python Dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Download Spacy Model (Required for NLP)
+RUN python -m spacy download en_core_web_sm
+
 # Copy Application Code
 COPY . .
 
