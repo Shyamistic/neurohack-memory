@@ -27,6 +27,7 @@ ENV API_URL="http://127.0.0.1:8000"
 # Revert to standard port for cloud (Render often sets PORT, handled in entrypoint)
 ENV PORT=8501
 ENV PYTHONPATH="${PYTHONPATH}:/app/src"
+ENV PYTHONUNBUFFERED=1
 
 # Expose Streamlit Port
 EXPOSE 8501
