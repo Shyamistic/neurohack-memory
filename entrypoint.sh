@@ -6,9 +6,23 @@ echo "🚀 Starting Backend on http://127.0.0.1:8000..."
 uvicorn server:app --host 127.0.0.1 --port 8000 > backend.log 2>&1 &
 BACKEND_PID=$!
 
-# Wait for Backend to initialize
+# Wait for Backend to initialize (Loop until port 8000 is open)
 echo "⏳ Waiting for backend to start..."
-sleep 5
+for i in {1..30}; do
+    if curl -s http://127.0.0.1:8000 > /dev/null; then
+        echo "✅ Backend is UP!"
+        break
+    fi
+    echo "zzz... ($i/30)"
+    sleep 1
+done
+
+# Check if backend died
+if ! kill -0 $BACKEND_PID 2>/dev/null; then
+    echo "❌ Backend FAILED to start. Showing logs:"
+    cat backend.log
+    exit 1
+fi
 
 # 2. Start Frontend (Streamlit) in foreground
 # Render/Heroku provide $PORT. Streamlit needs to bind to it.
