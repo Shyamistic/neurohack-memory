@@ -7,6 +7,7 @@ WORKDIR /app
 # System Dependencies (minimal)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy Requirements
@@ -24,7 +25,8 @@ COPY . .
 # Environment Variables
 ENV API_URL="http://127.0.0.1:8000"
 # Revert to standard port for cloud (Render often sets PORT, handled in entrypoint)
-ENV PORT=8501 
+ENV PORT=8501
+ENV PYTHONPATH="${PYTHONPATH}:/app/src"
 
 # Expose Streamlit Port
 EXPOSE 8501
