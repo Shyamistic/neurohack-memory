@@ -1,100 +1,158 @@
 
 import argparse
 import asyncio
+import json
 import random
+import requests
+import time
 import sys
-from neurohack_memory import MemorySystem
-from neurohack_memory.utils import load_yaml
+import os
+
+# Try importing local system for offline fallback
+try:
+    from neurohack_memory import MemorySystem
+    from neurohack_memory.utils import load_yaml
+    HAS_LOCAL = True
+except ImportError:
+    HAS_LOCAL = False
+
+API_URL = "http://localhost:8000"
+
+def get_backend_status():
+    try:
+        res = requests.get(f"{API_URL}/", timeout=1)
+        return res.status_code == 200
+    except:
+        return False
 
 async def run_demo(n_turns, noise_ratio):
-    print(f"Initializing Memory System for {n_turns} turns with {noise_ratio:.0%} noise...")
-    cfg = load_yaml("config.yaml")
-    sys = MemorySystem(cfg)
+    print(f"🚀 Initializing NeuroHack Data Generator for {n_turns} turns...")
     
-    # 1. Inject robust history
-    print("Simulating history...")
+    use_api = get_backend_status()
+    sys = None
     
-    # Key preferences we want to retrieve later
-    targets = [
-        (10, "Call me after 9 AM"),
-        (500, "Actually, prefer calls after 2 PM"), 
-        (n_turns - 50, "Update: Only calls between 4 PM and 6 PM are allowed")
-    ]
+    if use_api:
+        print("✅ Backend Detected: Seeding via API (Live Updates)")
+    else:
+        print("⚠️ Backend Offline: Seeding via Direct DB Access (Restart Backend after this!)")
+        if HAS_LOCAL:
+            cfg = load_yaml("config.yaml")
+            sys = MemorySystem(cfg)
+        else:
+            print("❌ Error: Cannot run offline (neurohack_memory not found). Run `run_prod.bat` first.")
+            return
+
+    # 1. LOAD DATASET
+    # 1. LOAD DATASET
+    print("📂 Loading Datasets...")
+    dataset = []
     
-    target_map = {t: msg for t, msg in targets}
-    
-    noise_phrases = ["Just checking", "System ping", "Log entry", "Status update", "Weather query"]
-    
-    for i in range(1, n_turns + 1):
-        if i % 500 == 0:
-            print(f"Processed {i} turns...", end='\r')
+    # Try loading synth_1200.json first (User Preference)
+    if os.path.exists("data/synth_1200.json"):
+        try:
+            with open("data/synth_1200.json", "r") as f:
+                d = json.load(f)
+                dataset.extend(d)
+                print(f"   Loaded {len(d)} turns from 'data/synth_1200.json'.")
+        except Exception as e:
+            print(f"   ❌ Failed to load synth_1200.json: {e}")
+
+    # Also load adversarial if available
+    if os.path.exists("data/adversarial_dataset.json"):
+        try:
+            with open("data/adversarial_dataset.json", "r") as f:
+                d = json.load(f)
+                dataset.extend(d)
+                print(f"   Loaded {len(d)} turns from 'data/adversarial_dataset.json'.")
+        except Exception as e:
+            print(f"   ❌ Failed to load adversarial_dataset.json: {e}")
             
-        if i in target_map:
-            user_text = target_map[i]
-        else:
-            if random.random() < noise_ratio:
-                user_text = f"[{random.choice(noise_phrases)}] {random.randint(0, 10000)}"
-            else:
-                user_text = "Standard interaction about project updates."
-                
-        # We can skip full processing for speed in this demo script and just inject
-        # But to be "honest", we should process. 
-        # For a demo, let's use the actual system but maybe mock the heavy LLM extractor if needed.
-        # However, since we want to show "Recall", we need these to be in the DB.
-        
-        # Optimization: Direct DB injection for noise, full processing for targets
-        if i in target_map:
-            # Log the "Evolution" of memory for the judge
-            print(f"  [Evolution T={i}] User Updated Constraint: '{user_text}'")
-            await sys.process_turn(user_text)
-        else:
-            # Just advance turn counter for noise without heavy processing
-            sys.turn += 1
-            # Or inject dummy memory if we want to fill the vector DB
-            if random.random() < 0.1: # Only inject 10% of noise to DB to keep it semi-realistic size
-                 pass 
-                 
-    print(f"\nSimulation Complete. Current Turn: {sys.turn}")
+    if not dataset:
+        print("   ⚠️ No datasets loaded. Falling back to synthetic stream.")
+
+    # 2. PREPARE STREAM
+    # We want facts, constraints, and preferences.
+    # We will overlay targets.
     
-    # 2. Interactive Retrieval with REASONING
+    targets = {
+        10: "Preference: Call me after 9 AM",
+        500: "Preference: Actually, prefer calls after 2 PM", 
+        int(n_turns * 0.9): "Preference: Update: Only calls between 4 PM and 6 PM are allowed"
+    }
+    
+    # Pre-generate all text to ensure we use valid JSON data
+    stream = []
+    
+    print(f"📦 Generating stream for {n_turns} turns...")
+    for i in range(1, n_turns + 1):
+        if i in targets:
+            text = targets[i]
+        else:
+            # Use dataset if available, wrapping around
+            if dataset:
+                item = dataset[(i-1) % len(dataset)]
+                text = item.get("user", "")
+            else:
+                # Fallback synthetic
+                text = f"System log entry {i}"
+        stream.append(text)
+
+    # 3. INJECT
+    start_time = time.time()
+    batch_size = 100 # Batch size for API
+    
+    if use_api:
+        # Batch Injection
+        for i in range(0, len(stream), batch_size):
+            batch = stream[i : i + batch_size]
+            try:
+                # Use the bulk seed endpoint
+                res = requests.post(f"{API_URL}/admin/seed", json={"texts": batch})
+                if res.status_code != 200:
+                    print(f"\n❌ Batch failed: {res.text}")
+                
+                # Progress
+                current = min(i + batch_size, n_turns)
+                pct = (current / n_turns) * 100
+                print(f"  Processed {current}/{n_turns} ({pct:.1f}%)", end='\r')
+            except Exception as e:
+                print(f"\n❌ Network Error: {e}")
+                break
+    else:
+        # Offline Injection
+        for i, text in enumerate(stream):
+            await sys.process_turn(text)
+            if (i+1) % 100 == 0:
+                print(f"  Processed {i+1}/{n_turns}...", end='\r')
+
+    duration = time.time() - start_time
+    print(f"\n✅ Seeding Complete in {duration:.2f}s")
+    
+    if not use_api and sys:
+        sys.close()
+        print("⚠️  REMINDER: Restart `server.py` (or run_prod.bat) to load these new memories!")
+
+    # 2. VERIFICATION QUERY
     print("\n" + "="*50)
-    print("DEMO: INTELLIGENT REASONING")
+    print("VERIFICATION: RETRIEVAL TEST")
     print("="*50)
     
-    queries = [
-        "When should I call you?",
-        "What are the calling constraints?",
-        "Can I call at 10 AM? (The Tricky One)"
-    ]
+    q = "When can I call?"
+    print(f"Q: {q}")
     
-    # Simple template-based reasoner to avoid API key dependency in demo but show the concept
-    def reason_response(q, mem):
-        val = mem.value.lower()
-        if "10 am" in q.lower():
-            if "after 2 pm" in val or "4 pm" in val or "6 pm" in val:
-                return f"No. You should call {val}."
-            return f"Yes, based on: {val}"
-        return f"Based on your preference '{val}', you should call then."
-
-    for q in queries:
-        print(f"\nQ: {q}")
-        res = sys.retrieve(q)
-        # print top result
-        if res["retrieved"]:
-            top = res["retrieved"][0]
-            # RAW MEMORY (Internal Trace)
-            print(f"  [Memory Retrieved]: {top.memory.value} (Conf: {top.memory.confidence:.2f})")
-            
-            # REASONING LAYER (The "Magic")
-            # In production, this would be: llm.generate(f"Context: {top.memory.value}. Q: {q}...")
-            # For this demo, we use a robust template to prove the point without API keys.
-            ans = reason_response(q, top.memory)
-            print(f"A: {ans}")
-            
-        else:
-            print("A: I don't have enough information to answer that.")
-            
-    sys.close()
+    if use_api:
+        try:
+            res = requests.post(f"{API_URL}/query", json={"query": q}).json()
+            if res.get("retrieved"):
+                top = res["retrieved"][0]["memory"]["value"]
+                print(f"A: [API] {top}")
+            else:
+                print("A: [API] No match found.")
+        except Exception as e:
+             print(f"Error querying API: {e}")
+    else:
+        # Offline query check 
+        print("(Skipping query check - requires restart)")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

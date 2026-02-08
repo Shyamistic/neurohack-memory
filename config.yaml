@@ -1,12 +1,19 @@
 memory:
+  # Persistence Path
+  storage:
+    path: "artifacts/memory_v2.sqlite"
+
   confidence_threshold: 0.72
   top_k: 6
   rerank: true
   max_injected_tokens: 320
-  decay_lambda: 0.008
-  max_memory_age_turns: 1400
+  decay_lambda: 0.001
+  max_memory_age_turns: 6000
 vector:
-  embedding_model: all-MiniLM-L6-v2
+  # Using a smaller model to avoid OOM on standard machines during demo
+  embedding_model: "all-MiniLM-L6-v2"
+  dim: 384
+  similarity_threshold: 0.4 # Slightly lower for MiniLM
 evaluation:
   checkpoints: [100, 500, 937, 1000, 1200]
   recall_k: 6

@@ -1,5 +1,6 @@
 from typing import Dict, List
 import os
+import asyncio
 from .types import MemoryEntry, RetrievedMemory
 from .extractors import extract
 from .store_sqlite import SQLiteMemoryStore
@@ -18,17 +19,57 @@ class MemorySystem:
         self.vindex = VectorIndex(self.cfg["vector"]["embedding_model"])
         self.turn = 0
         self._memory_cache = {}
+        
+        # RESTORE STATE
+        self._rebuild_index()
+
+    def _rebuild_index(self):
+        """Rebuilds the in-memory vector index from SQLite."""
+        all_mems = self.store.all()
+        if not all_mems:
+            return
+            
+        # Restore cache
+        for m in all_mems:
+            self._memory_cache[m.memory_id] = m
+            # Track max turn
+            if m.source_turn > self.turn:
+                self.turn = m.source_turn
+        
+        # Re-add to Vector Index
+        # We only need to add them; VectorIndex handles embedding if not cached?
+        # Actually VectorIndex.add_or_update embeds them.
+        # This might be slow on startup for 5000+ items, but it's necessary since we don't save the index.
+        # Optimization: We could pickle the index, but for now, re-embedding or checks is safer.
+        # WAIT: Re-embedding 5000 items on every startup is SLOW (approx 10-20s).
+        # But it's better than data loss.
+        # Ideally we should serialize FAISS.
+        # For this hackathon scope, strict correctness > startup speed.
+        print(f"🔄 Rebuilding Index from {len(all_mems)} memories...")
+        self.vindex.add_or_update(all_mems)
+        print("✅ Index Rebuilt.")
 
     async def process_turn(self, user_text):
         self.turn += 1
         t_extract = Timer.start()
+        
+        # Async Extraction (Network Bound - Fine)
         extracted = await extract(user_text, self.turn)
         extract_ms = t_extract.ms()
+        
+        # Offload Blocking I/O and CPU work to ThreadPool
+        # This prevents blocking the FastAPI Event Loop during Injection
+        if extracted:
+            await asyncio.to_thread(self._persist_memories, extracted)
+            
+        return {"turn": self.turn, "extracted": extracted, "extract_ms": extract_ms}
+
+    def _persist_memories(self, extracted):
+        # This runs in a separate thread
         for m in extracted:
             self._memory_cache[m.memory_id] = m
         self.store.upsert_many(extracted)
         self.vindex.add_or_update(extracted)
-        return {"turn": self.turn, "extracted": extracted, "extract_ms": extract_ms}
 
     def retrieve(self, query):
         cfgm = self.cfg["memory"]
@@ -108,6 +149,16 @@ class MemorySystem:
 
         retrieve_ms = t.ms()
         injected = format_injection([r.memory for r in retrieved], max_tokens=cfgm["max_injected_tokens"])
+        
+        # POLISH: Update usage stats
+        to_update = []
+        for r in retrieved:
+            r.memory.use_count += 1
+            r.memory.last_used_turn = self.turn
+            to_update.append(r.memory)
+        if to_update:
+            self.store.upsert_many(to_update)
+
         return {"turn": self.turn, "retrieved": retrieved, "retrieve_ms": retrieve_ms, "injected_context": injected}
 
     def close(self):

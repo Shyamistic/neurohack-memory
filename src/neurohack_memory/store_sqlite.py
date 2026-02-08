@@ -22,6 +22,7 @@ class SQLiteMemoryStore:
         os.makedirs("artifacts", exist_ok=True)
         self.path = path
         self.conn = sqlite3.connect(self.path, check_same_thread=False)
+        self.conn.execute("PRAGMA journal_mode=WAL;")
         self.conn.executescript(SCHEMA)
         self.conn.commit()
 
